@@ -1,0 +1,37 @@
+[project]
+name = "pyparse"
+dynamic = ["version"]
+
+[build-system]
+requires = [
+    "setuptools>=61.0", 
+    "setuptools_scm", 
+    "construct"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+write_to = "src/pyparse/version.py"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov"
+]
+
+[tool.pytest.ini_options]
+addopts = [
+    "-ra",
+    "-s",
+    "--cov=pyparse",
+    "--cov-report=term-missing",
+
+] 
+testpaths = [
+    "tests"
+]
+pythonpath = [
+    "src"
+]
+python_files = [
+    "utest_*.py"
+]
