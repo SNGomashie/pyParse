@@ -33,5 +33,5 @@ pythonpath = [
     "src"
 ]
 python_files = [
-    "utest_*.py"
+    "test_*.py"
 ]
