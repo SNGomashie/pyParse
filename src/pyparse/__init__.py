@@ -1,4 +1,5 @@
 
+from pyparse.base         import BinaryPacket
 from pyparse.binary_types import IntegerBinaryType
 
 
