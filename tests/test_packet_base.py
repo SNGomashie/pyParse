@@ -1,9 +1,9 @@
 import pytest
 
-from construct import BytesInteger, Struct
+from construct import BytesInteger, Struct, BitsInteger, BitStruct
 
-from pyparse        import b_uint8, b_uint16
-from pyparse.base   import FieldInfo, PacketMeta, BinaryPacket
+from pyparse import b_int, b_uint8, b_uint16
+from pyparse.base import FieldInfo, PacketMeta, BinaryPacket, FieldAlignmentError, AlignmentPolicy
 from pyparse.errors import InvalidBinaryFieldType
 
 
@@ -37,8 +37,8 @@ def test_packet_metaclass_build_construct():
     annotations = {'field0': b_uint8,
                    'field1': b_uint16}
     
-    struct = PacketMeta._build_construct(annotations)
-    
+    struct, _ = PacketMeta._build_construct(annotations)
+
     assert struct.subcons[0].name == 'field0'
     assert struct.subcons[0].sizeof() == 1
     assert struct.subcons[1].name == 'field1'
@@ -85,6 +85,16 @@ def test_binary_packet_to_dict_nested():
     packet_dict = TestPacket(a=Nested(a=10))._to_dict()
     assert 'a' in packet_dict
     assert packet_dict['a'] == {'a': 10}
+
+
+def test_binary_packet_to_dict_bitwise():
+    class TestPacket(BinaryPacket):
+        a: b_int[6, False]
+        b: b_int[2, False]
+
+    packet_dict = TestPacket(a=0, b=1)._to_dict()
+    assert 'a_b' in packet_dict
+    assert packet_dict['a_b'] == {'a': 0, 'b': 1}
 
 
 def test_binary_packet_serialize_not_nested():
@@ -135,9 +145,41 @@ def test_binary_packet_from_container_nested():
     assert packet.a.a == 10
 
 
+def test_binary_packet_from_container_bitwise():
+    class TestPacket(BinaryPacket):
+        a: b_int[6, False]
+        b: b_int[2, False]
+
+    struct = Struct('a_b' / BitStruct('a' / BitsInteger(6, False),
+                                      'b' / BitsInteger(2, False)))
+    parsed = struct.parse(b'\x00')
+
+    packet = TestPacket._from_container(parsed)
+    assert packet.a == 0
+    assert packet.b == 0
+
+
 def test_binary_packet_parse_not_nested():
     class TestPacket(BinaryPacket):
         a: b_uint16
-        
-    packet = TestPacket.parse(b'\x0A')
-    assert packet.a == 10
+
+    packet = TestPacket.parse(b'\x0A\x0A')
+    assert packet.a == 2570
+
+
+def test_binary_packet_strict_alignment_failed():
+    with pytest.raises(FieldAlignmentError):
+        class TestPacket(BinaryPacket):
+            a: b_int[2, False]
+
+
+def test_binary_packet_pad_alignment_failed():
+    with pytest.raises(NotImplementedError):
+        class TestPacket(BinaryPacket, policy=AlignmentPolicy.PAD):
+            a: b_int[2, False]
+
+
+def test_binary_packet_ignore_alignment_failed():
+    with pytest.raises(NotImplementedError):
+        class TestPacket(BinaryPacket, policy=AlignmentPolicy.IGNORE):
+            a: b_int[2, False]

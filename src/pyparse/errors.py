@@ -16,3 +16,8 @@ class BinaryDefinitionError(Exception):
 class InvalidBinaryFieldType(TypeError):
     """
     """
+
+
+class FieldAlignmentError(TypeError):
+    """
+    """

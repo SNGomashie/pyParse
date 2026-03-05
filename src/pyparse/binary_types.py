@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from functools import lru_cache
 from typing import Any, ClassVar
 
-from construct import BytesInteger, Struct
+from construct import BytesInteger, BitsInteger, Struct
 
 from pyparse.errors import BinaryDefinitionError, BinaryTypeError
 
@@ -63,16 +63,13 @@ class IntegerBinaryType(AbstractBinaryType):
         if not isinstance(bits, int) or bits <= 0:
             raise BinaryDefinitionError("Width in bits must be a positive integer")
 
-        if bits % 8 != 0:
-            raise BinaryDefinitionError("Width in bits must be a multiple of 8")
-
         if not isinstance(signed, bool):
             raise BinaryDefinitionError("Signed must be a boolean")
         
         return _build_integer_type(cls, bits, signed)
 
     @classmethod
-    def to_construct(cls) -> BytesInteger:
+    def to_construct(cls) -> BytesInteger | BitsInteger:
         """ Convert this integer definition into a construct parser.
         
         Only use byte-aligned integers.
@@ -83,7 +80,10 @@ class IntegerBinaryType(AbstractBinaryType):
         bits   = meta['bits']
         signed = meta['signed']
 
-        return BytesInteger(bits // 8, signed=signed)
+        if bits % 8 == 0:
+            return BytesInteger(bits // 8, signed=signed)
+        else:
+            return BitsInteger(bits, signed=signed)
 
 
 @lru_cache(None)
