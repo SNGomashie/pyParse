@@ -3,3 +3,14 @@ venv/
 env/
 .env/
 .venv/
+
+.idea/
+
+.pytest_cache/
+
+src/pyparse/__pycache__/
+tests/__pycache__/
+src/pyparse.egg-info
+build/
+
+src/pyparse/version.py
