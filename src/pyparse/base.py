@@ -1,12 +1,13 @@
 import dataclasses
 
 from enum import StrEnum
-from typing import dataclass_transform
+from typing import dataclass_transform, get_type_hints
 
-from construct import Construct, BitStruct, Struct
+from construct import Construct, BitStruct, Struct, ListContainer, Container, ConstructError
 
-from pyparse.binary_types import AbstractBinaryType
-from pyparse.errors import InvalidBinaryFieldType, FieldAlignmentError
+from pyparse.binary_types import AbstractBinaryType, ArrayBinaryType
+from pyparse.errors import (InvalidBinaryFieldType, FieldAlignmentError, prettify_build_exception,
+                            prettify_parse_exception)
 
 
 class AlignmentPolicy(StrEnum):
@@ -44,10 +45,18 @@ class FieldInfo:
     @property
     def is_nested(self) -> bool:
         """ Returns whether the field is a nested ``BinaryPacket`` type.
-        
+
         :returns: ``True`` if a nested packet, ``False`` otherwise.
         """
         return isinstance(self.annotation, type) and issubclass(self.annotation, BinaryPacket)
+
+    @property
+    def is_array(self) -> bool:
+        """ Returns whether the field is an array type.
+
+        :returns: ``True`` if an array packet, ``False`` otherwise.
+        """
+        return issubclass(self.annotation, ArrayBinaryType)
 
     @property
     def is_bit_field(self) -> bool:
@@ -55,7 +64,7 @@ class FieldInfo:
 
         :returns: ``True`` if a bit field type, ``False`` otherwise.
         """
-        return not self.is_nested and self.bits % 8 != 0
+        return not self.is_nested and not self.is_array and self.bits % 8 != 0
 
     @property
     def bits(self) -> int:
@@ -63,7 +72,7 @@ class FieldInfo:
 
         :returns: number of bits of the type in the bit field.
         """
-        return self.annotation.__meta__['bits']
+        return self.annotation.__meta__.get('bits', 8)
 
 
 @dataclasses.dataclass
@@ -78,8 +87,17 @@ class BitFieldInfo:
     :param name:   Identifier for the bit field group.
     :param fields: Ordered list of :class:`FieldInfo` entries comprising the group.
     """
-    name:  str
+    name:   str
     fields: list[FieldInfo]
+
+
+def is_binary_packet(annotation) -> bool:
+    """ Returns whether an annotation is a subclass of ``BinaryPacket``.
+
+    :param annotation: The annotation to check.
+    :returns: ``True`` if ``annotation`` is a ``BinaryPacket`` subclass, ``False`` otherwise.
+    """
+    return isinstance(annotation, type) and issubclass(annotation, BinaryPacket)
 
 
 @dataclass_transform()
@@ -102,24 +120,11 @@ class PacketMeta(type):
         # Create raw class object without modifications
         raw = super().__new__(cls, name, bases, namespace)
 
-        annotations: dict[str, AbstractBinaryType | BinaryPacket] = {}
-        for base in reversed(raw.__mro__):
-            annotations.update(getattr(base, "__annotations__", {}))
-
-        annotations.update(namespace.get('__annotations__', {}))
+        annotations: dict[str, AbstractBinaryType | BinaryPacket] = get_type_hints(raw, include_extras=True)
 
         raw.__construct__, raw.__groups__ = cls._build_construct(annotations, policy)
         # Turn it into a keyword only dataclass.
         return dataclasses.dataclass(raw, kw_only=True)
-
-    @staticmethod
-    def _is_binary_packet(annotation) -> bool:
-        """ Returns whether an annotation is a subclass of ``BinaryPacket``.
-
-        :param annotation: The annotation to check.
-        :returns: ``True`` if ``annotation`` is a ``BinaryPacket`` subclass, ``False`` otherwise.
-        """
-        return isinstance(annotation, type) and issubclass(annotation, BinaryPacket)
 
     @staticmethod
     def _build_construct(annotations: dict, policy: AlignmentPolicy = AlignmentPolicy.STRICT):
@@ -133,8 +138,8 @@ class PacketMeta(type):
         :param policy:      Alignment policy forwarded to :meth:`_group_fields`.
         :returns:           A tuple of ``(Struct, list[FieldInfo | BitFieldInfo])``.
         """
-        fields  = [FieldInfo(name, anno) for name, anno in annotations.items()]
-        groups  = PacketMeta._group_fields(fields, policy)
+        fields = [FieldInfo(name, anno) for name, anno in annotations.items()]
+        groups = PacketMeta._group_fields(fields, policy)
         return Struct(*[PacketMeta._group_to_subcon(group) for group in groups]), groups
 
     @staticmethod
@@ -151,11 +156,13 @@ class PacketMeta(type):
         :param policy: Determines behavior when a bit group is not byte-aligned on flush.
         :returns:      Ordered list of :class:`FieldInfo` and :class:`BitFieldInfo` groups.
         """
-        groups    = []
-        buffer    = []
+        groups = []
+        buffer = []
         bit_count = 0
 
         def flush():
+            """ Flush the bit buffer, create a BitFieldInfo object and append it to the group.
+            """
             nonlocal bit_count
             if not buffer:
                 return
@@ -277,13 +284,18 @@ class BinaryPacket(metaclass=PacketMeta):
 
             value = getattr(self, group.name)
 
+            if isinstance(value, list):
+                for index, sub_field in enumerate(value):
+                    if isinstance(sub_field, BinaryPacket):
+                        value[index] = sub_field._to_dict()
+
             # If the value is another BinaryPacket, recursively generate the dict for this binary packet.
             if isinstance(value, BinaryPacket):
                 result[group.name] = value._to_dict()
             else:
                 result[group.name] = value
         return result
-    
+
     def serialize(self) -> bytes:
         """ Serializes the packet to its binary byte representation.
 
@@ -309,15 +321,42 @@ class BinaryPacket(metaclass=PacketMeta):
                 continue
 
             value = container.get(group.name)
-            annotation = cls.__annotations__.get(group.name)
+            # annotation = cls.__annotations__.get(group.name)
+            annotation = get_type_hints(cls).get(group.name)
+
+            # Process array
+            if issubclass(annotation, ArrayBinaryType):
+                if isinstance(container[group.name], ListContainer):
+                    fields = cls._parse_list_container(value, annotation)
+                    kwargs[group.name] = fields
+                continue
 
             # if the associated annotation is a binary packet, recursively convert the associated container.
-            if PacketMeta._is_binary_packet(annotation):
+            if is_binary_packet(annotation):
                 kwargs[group.name] = annotation._from_container(value)
             else:
                 kwargs[group.name] = value
 
         return cls(**kwargs)
+
+    @staticmethod
+    def _parse_list_container(field_list: ListContainer, annotation: type[AbstractBinaryType]):
+        """ Convert a ListContainer to a list containing the original type of each element.
+
+        :param field_list:
+        :param annotation: Original element type.
+        """
+        fields = list(field_list)
+        parsed_fields = []
+
+        for field in fields:
+            if isinstance(field, Container):
+                list_element = annotation.__meta__['element']
+
+                field = list_element(**{k: v for k, v in field.items() if not k.startswith('_')})
+            parsed_fields.append(field)
+
+        return parsed_fields
 
     @classmethod
     def parse(cls, data: bytes) -> "BinaryPacket":

@@ -1,50 +1,51 @@
-from inspect import isabstract
-
 import pytest
-from construct import BytesInteger, BitsInteger
+from construct import BytesInteger
 
 from pyparse.errors import BinaryDefinitionError, BinaryTypeError
-from pyparse.binary_types import IntegerBinaryType, _build_integer_type
+from pyparse.binary_types import _build_integer_type
+from pyparse.binary_types import IntegerBinaryType
+
+from pyparse import b_int
 
 
 def test_class_get_item_rejects_non_tuple() -> None:
-    with pytest.raises(BinaryTypeError):
-        IntegerBinaryType['nope']
+    with pytest.raises(BinaryDefinitionError):
+        b_int['nope']
 
 
 def test_class_get_item_rejects_wrong_arity() -> None:
     with pytest.raises(BinaryTypeError):
-        IntegerBinaryType[8, True, 0]
+        b_int[8, True, 0]
 
 
 @pytest.mark.parametrize('bits', [0, -1, -8])
 def test_class_get_item_rejects_non_positive_bits(bits: int) -> None:
     with pytest.raises(BinaryDefinitionError):
-        IntegerBinaryType[bits, True]
+        b_int[bits, True]
 
 
 def test_class_get_item_rejects_non_int_bits() -> None:
     with pytest.raises(BinaryDefinitionError):
-        IntegerBinaryType['8', True]
+        b_int['8', True]
 
 
 def test_class_get_item_rejects_non_bool_signed() -> None:
     with pytest.raises(BinaryDefinitionError):
-        IntegerBinaryType[8, 1]
+        b_int[8, 1]
 
 
 def test_build_returns_concrete_subclass() -> None:
-    t = IntegerBinaryType[8, True]
+    t = b_int[8, True]
     assert isinstance(t, type)
     assert issubclass(t, int)
-    assert issubclass(t, IntegerBinaryType)
+    assert issubclass(t, b_int)
 
 
 def test_build_caches_by_family_parameters() -> None:
-    a = IntegerBinaryType[8, True]
-    b = IntegerBinaryType[8, True]
-    c = IntegerBinaryType[8, False]
-    
+    a = b_int[8, True]
+    b = b_int[8, True]
+    c = b_int[8, False]
+
     assert a is b
     assert a is not c
 

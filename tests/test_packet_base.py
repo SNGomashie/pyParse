@@ -3,13 +3,8 @@ import pytest
 from construct import BytesInteger, Struct, BitsInteger, BitStruct
 
 from pyparse import b_int, b_uint8, b_uint16
-from pyparse.base import FieldInfo, PacketMeta, BinaryPacket, FieldAlignmentError, AlignmentPolicy
+from pyparse.base import FieldInfo, PacketMeta, BinaryPacket, FieldAlignmentError, AlignmentPolicy, is_binary_packet
 from pyparse.errors import InvalidBinaryFieldType
-
-
-def test_field_info_is_not_nested():
-    info = FieldInfo('test', b_uint8)
-    assert not info.is_nested
 
 
 def test_field_info_is_not_nested():
@@ -50,14 +45,14 @@ def test_packet_metaclass_build_construct():
 def test_packet_metaclass_is_not_binary_packet():
     annotation = b_uint16
     
-    assert PacketMeta._is_binary_packet(annotation) is False
+    assert is_binary_packet(annotation) is False
 
 
 def test_packet_metaclass_is_binary_packet():
     class TestPacket(BinaryPacket):
         a: b_uint8
     
-    assert PacketMeta._is_binary_packet(TestPacket) is True
+    assert is_binary_packet(TestPacket) is True
 
 
 def test_binary_packet_invalid_type():
