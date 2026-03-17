@@ -6,8 +6,7 @@ from typing import dataclass_transform, get_type_hints
 from construct import Construct, BitStruct, Struct, ListContainer, Container, ConstructError
 
 from pyparse.binary_types import AbstractBinaryType, ArrayBinaryType
-from pyparse.errors import (InvalidBinaryFieldType, FieldAlignmentError, prettify_build_exception,
-                            prettify_parse_exception)
+from pyparse.errors import InvalidBinaryFieldType, FieldAlignmentError, PacketParseError, PacketBuildError
 
 
 class AlignmentPolicy(StrEnum):
@@ -301,7 +300,10 @@ class BinaryPacket(metaclass=PacketMeta):
 
         :returns: Raw bytes encoding of the packet.
         """
-        return self.__construct__.build(self._to_dict())
+        try:
+            return self.__construct__.build(self._to_dict())
+        except ConstructError as e:
+            raise PacketBuildError(self, e) from e
 
     @classmethod
     def _from_container(cls, container) -> "BinaryPacket":
@@ -365,5 +367,9 @@ class BinaryPacket(metaclass=PacketMeta):
         :param data: Raw bytes to parse.
         :returns:    A fully populated instance of ``cls``.
         """
-        parsed = cls.__construct__.parse(data)
-        return cls._from_container(parsed)
+        try:
+            parsed = cls.__construct__.parse(data)
+        except ConstructError as e:
+            raise PacketParseError(cls, e) from e
+        else:
+            return cls._from_container(parsed)
