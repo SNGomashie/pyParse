@@ -57,7 +57,7 @@ class PacketBuildError(ParsingError):
         self.cause = _make_reason_readable(cause)
         path_str = " -> ".join(self.field_path) if self.field_path else "<root>"
         super().__init__(
-            f"Failed to parse {self.packet_type.__name__} at field '{path_str}': {self.cause}"
+            f"Failed to build {self.packet_type.__name__} at field '{path_str}': {self.cause}"
         )
 
 

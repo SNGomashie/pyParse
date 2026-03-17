@@ -9,25 +9,38 @@ from pyparse.errors import PacketBuildError, PacketParseError
 from pyparse._builder import AlignmentPolicy, build_construct, BitFieldInfo
 
 
-@dataclass_transform()
+@dataclass_transform(kw_only_default=True)
 class BinaryPacket:
-    """ Base class for all binary packet definitions.
+    """ Base class for declarative binary packet definitions.
 
-    Subclasses declare fields as class-level annotations with types derived from
-    ``AbstractBinaryType`` or nested ``BinaryPacket`` subclasses. The metaclass
-    :class:`PacketMeta` handles struct construction, grouping, and dataclass wrapping
-    at class-creation time, so subclasses require no boilerplate beyond their annotations.
+          Subclass ``BinaryPacket`` and annotate fields using the provided ``b_*`` binary types.
+          At class-creation time the annotations are compiled into an internal construct
+          ``Struct``, and the class is wrapped as a keyword-only dataclass — no ``__init__``
+          boilerplate required.
 
-    Example::
+          Supported field types:
 
-        class MyPacket(BinaryPacket):
-            field_a: UInt8
-            field_b: UInt16
+          - Integers: ``b_int[bits, signed]``, ``b_uint8``, ``b_int16``
+          - Bytes: ``b_bytes[n]`` — fixed-width raw bytes
+          - Arrays: ``b_array[count, element]``
+          - Nested ``BinaryPacket`` subclasses
 
-        packet = MyPacket(field_a=1, field_b=256)
-        raw = pkt.serialize()
-        restored_packet = MyPacket.parse(raw)
-    """
+          Consecutive sub-byte fields (e.g. ``b_int[6]``) are automatically packed into a
+          ``BitStruct``. The alignment policy can be configured per-class via the ``policy``
+          keyword argument.
+
+          Example::
+
+              from pyparse import BinaryPacket, b_uint8, b_uint16, b_bytes, b_array
+
+              class Frame(BinaryPacket):
+                  count:   b_uint8
+                  payload: b_array['count', b_uint8]
+
+              frame   = Frame(count=3, payload=[0, 1, 2])
+              raw     = frame.serialize()         # bytes
+              p_frame = Frame.parse(raw)          # Frame instance
+          """
     def __init_subclass__(cls, policy: AlignmentPolicy = AlignmentPolicy.STRICT, **kwargs):
         """ Process field annotations at class-creation time.
 
@@ -119,11 +132,13 @@ class BinaryPacket:
 
     @staticmethod
     def _parse_list_container(field_list: ListContainer, annotation):
-        """ Convert a ListContainer to a list containing the original type of each element.
+        """ Convert a ListContainer produced by construct into a plain Python list.
 
-        :param field_list:
-        :param annotation: Original element type.
+        :param field_list: The ``ListContainer`` from a parsed construct result.
+        :param annotation: The ``Annotated`` array field type.
+        :returns:          A list of element values.
         """
+
         element = get_binary_meta(annotation).element
         parsed_fields = []
 

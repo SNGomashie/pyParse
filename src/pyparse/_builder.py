@@ -1,6 +1,7 @@
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Annotated
 
 from construct import BitStruct, Construct, Struct
 
@@ -21,17 +22,18 @@ class FieldInfo:
     """ Represents metadata for a single field within a ``BinaryPacket``.
 
     Stores the field name and its associated type annotation, which must be
-    either a concrete ``AbstractBinaryType`` subclass or a nested ``BinaryPacket``
-    subclass. Instantiation will fail if neither condition is met.
+    either an ``Annotated`` binary type or a nested ``BinaryPacket`` subclass.
+    Instantiation will fail if neither condition is met.
 
     :param name:       The field's attribute name as declared in the packet.
-    :param annotation: The field's type, must be a subclass of either ``AbstractBinaryType`` or ``BinaryPacket``.
+    :param annotation: The field's type.
 
-    :raises InvalidBinaryFieldType: If ``annotation`` is neither a subclass of ``AbstractBinaryType`` nor
-                                    ``BinaryPacket``.
+    :raises InvalidBinaryFieldType: If ``annotation`` carries no binary metadata
+                                    and has no ``__construct__`` attribute.
     """
+
     name:       str
-    annotation: "type[AbstractBinaryType | BinaryPacket]"
+    annotation: "type[BinaryPacket]"
 
     def __post_init__(self) -> None:
         """ Check whether the annotation field is either a binary type, or a binary packet.
@@ -51,21 +53,12 @@ class FieldInfo:
         return hasattr(self.annotation, '__construct__')
 
     @property
-    def is_array(self) -> bool:
-        """ Returns whether the field is an array type.
-
-        :returns: ``True`` if an array packet, ``False`` otherwise.
-        """
-        return False
-        # return isinstance(get_binary_meta(self.annotation), ArrayBinaryType)
-
-    @property
     def is_bit_field(self) -> bool:
         """ Returns whether the field is a bit field type.
 
         :returns: ``True`` if a bit field type, ``False`` otherwise.
         """
-        return not self.is_nested and not self.is_array and self.bits % 8 != 0
+        return not self.is_nested and self.bits % 8 != 0
 
     @property
     def bits(self) -> int:
@@ -128,7 +121,7 @@ def group_fields(fields: list[FieldInfo], policy: AlignmentPolicy = AlignmentPol
     Byte-aligned fields and nested packets are emitted as bare :class:`FieldInfo` entries.
     Consecutive bit fields are accumulated and flushed into a :class:`BitFieldInfo`
     once their combined width reaches a byte boundary, or at the end of the field list.
-    Alignment of incomplete groups is delegated to :meth:`_apply_alignment`.
+    Alignment of incomplete groups is delegated to :meth:`apply_alignment`.
 
     :param fields: Ordered list of :class:`FieldInfo` entries to partition.
     :param policy: Determines behavior when a bit group is not byte-aligned on flush.
@@ -183,7 +176,7 @@ def group_to_subcon(group: FieldInfo | BitFieldInfo) -> Construct:
     """ Maps a group to its ``construct`` subcon.
 
     Bit field groups are wrapped in a ``BitStruct``; all others are forwarded
-    to :meth:`_field_to_subcon`.
+    to :meth:`field_to_subcon`.
 
     :param group: A :class:`FieldInfo` or :class:`BitFieldInfo` to convert.
     :returns:     A named ``construct`` subcon.
