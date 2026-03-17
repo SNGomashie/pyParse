@@ -1,15 +1,17 @@
+from typing import Annotated, TypeAlias
+
 from pyparse.base         import BinaryPacket
-from pyparse.binary_types import IntegerBinaryType, BytesBinaryType, ArrayBinaryType
+from pyparse.binary_types import b_array, b_bytes, b_int, BytesBinaryMeta, IntegerBinaryMeta
+from pyparse._builder     import AlignmentPolicy
 
 
-b_int: type[IntegerBinaryType] = IntegerBinaryType
-b_uint8: type[int]   = IntegerBinaryType[8, False]
-b_int8: type[int]    = IntegerBinaryType[8, True]
-b_uint16: type[int]  = IntegerBinaryType[16, False]
-b_int16: type[int]   = IntegerBinaryType[16, True]
-b_uint32: type[int]  = IntegerBinaryType[32, False]
-b_int32: type[int]   = IntegerBinaryType[32, True]
-b_uint64: type[int]  = IntegerBinaryType[64, False]
-b_int64: type[int]   = IntegerBinaryType[64, True]
-b_bytes: type[BytesBinaryType] = BytesBinaryType
-b_array: type[ArrayBinaryType] = ArrayBinaryType
+b_uint8:  TypeAlias = Annotated[int, IntegerBinaryMeta(8, False)]
+b_int8:   TypeAlias = Annotated[int, IntegerBinaryMeta(8, True)]
+b_uint16: TypeAlias = Annotated[int, IntegerBinaryMeta(16, False)]
+b_int16:  TypeAlias = Annotated[int, IntegerBinaryMeta(16, True)]
+b_uint32: TypeAlias = Annotated[int, IntegerBinaryMeta(32, False)]
+b_int32:  TypeAlias = Annotated[int, IntegerBinaryMeta(32, True)]
+b_uint64: TypeAlias = Annotated[int, IntegerBinaryMeta(64, False)]
+b_int64:  TypeAlias = Annotated[int, IntegerBinaryMeta(64, True)]
+
+b_byte:   TypeAlias = Annotated[bytes, BytesBinaryMeta(1)]
