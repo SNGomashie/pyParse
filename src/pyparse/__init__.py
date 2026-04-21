@@ -1,7 +1,7 @@
 from typing import Annotated, TypeAlias
 
 from pyparse.base         import BinaryPacket
-from pyparse.binary_types import b_array, b_bytes, b_int, BytesBinaryMeta, IntegerBinaryMeta
+from pyparse.binary_types import b_array, b_bytes, b_enum, b_flag, b_greedy, b_int, BytesBinaryMeta, IntegerBinaryMeta
 from pyparse._builder     import AlignmentPolicy
 
 

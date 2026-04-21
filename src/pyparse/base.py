@@ -4,7 +4,7 @@ from typing import dataclass_transform, get_type_hints
 
 from construct import ListContainer, Container, ConstructError
 
-from pyparse.binary_types import get_binary_meta, ArrayBinaryMeta
+from pyparse.binary_types import get_binary_meta, ArrayBinaryMeta, GreedyBinaryMeta
 from pyparse.errors import PacketBuildError, PacketParseError
 from pyparse._builder import AlignmentPolicy, build_construct, BitFieldInfo
 
@@ -117,7 +117,7 @@ class BinaryPacket:
             annotation = get_type_hints(cls, include_extras=True).get(group.name)
 
             # Process array
-            if isinstance(get_binary_meta(annotation), ArrayBinaryMeta):
+            if isinstance(get_binary_meta(annotation), (ArrayBinaryMeta, GreedyBinaryMeta)):
                 if isinstance(container[group.name], ListContainer):
                     kwargs[group.name] = cls._parse_list_container(value, annotation)
                 continue

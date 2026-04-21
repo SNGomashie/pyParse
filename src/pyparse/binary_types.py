@@ -2,9 +2,10 @@
 which is used to create appropriate concrete binary types.
 """
 from dataclasses import dataclass
+from enum import Enum, Flag, EnumType
 from typing import Any,  Annotated, get_origin, get_args
 
-from construct import Array, BytesInteger, BitsInteger, Bytes, this
+from construct import Array, BytesInteger, BitsInteger, Bytes, this, Adapter, GreedyRange
 
 from pyparse.errors import BinaryDefinitionError, BinaryTypeError
 
@@ -45,6 +46,119 @@ class b_int:
         if not isinstance(signed, bool):
             raise BinaryDefinitionError("Signed must be a boolean")
         return Annotated[int, IntegerBinaryMeta(bits, signed)]  # type: ignore[return-value]
+
+
+@dataclass(frozen=True)
+class EnumBinaryMeta:
+    """ Metadata for an enum-valued integer field of arbitrary bit width.
+
+    Wraps a ``BytesInteger`` or ``BitsInteger`` with an adapter that converts
+    raw integers to/from the given ``IntEnum`` subclass on parse/build.
+    """
+
+    bits: int
+    type: EnumType
+    signed: bool = False
+
+    def to_construct(self) -> Adapter:
+        if self.bits % 8 == 0:
+            base = BytesInteger(self.bits // 8, signed=self.signed)
+        else:
+            base = BitsInteger(self.bits, signed=self.signed)
+
+        enumType = self.type
+
+        class EnumAdapter(Adapter):
+            def _decode(self, obj, context, path):
+                return enumType(obj)
+
+            def _encode(self, obj, context, path):
+                return obj.value if isinstance(obj, enumType) else int(obj)
+
+        return EnumAdapter(base)
+
+
+class b_enum:
+    """ Factory for enum-valued field annotations.
+
+    Use ``b_enum[bits, EnumType, signed]``.  All three arguments are required.
+
+    :param bits:     Width of the field in bits (positive integer).
+    :param EnumType: An ``IntEnum`` subclass whose values map to the raw integer.
+    :param signed:   ``True`` for a signed field, ``False`` for unsigned.
+    """
+    @classmethod
+    def __class_getitem__(cls, args) -> type[Enum]:
+        if not isinstance(args, tuple) or len(args) not in (2, 3):
+            raise BinaryTypeError("Use b_enum[bits, enumType] or b_enum[bits, enumType, signed]")
+
+        bits, enumType, *remaining = args
+        signed = remaining[0] if remaining else False
+
+        if not isinstance(bits, int) or bits <= 0:
+            raise BinaryDefinitionError("Width in bits must be a positive integer")
+        if not isinstance(signed, bool):
+            raise BinaryDefinitionError("Signed must be a boolean")
+        if not isinstance(enumType, EnumType):
+            raise BinaryDefinitionError("enumType must be an Enum")
+
+        return Annotated[enumType, EnumBinaryMeta(bits, enumType, signed)]
+
+
+@dataclass(frozen=True)
+class FlagBinaryMeta:
+    """ Metadata for a bitmask/flag field of arbitrary bit width.
+
+    Wraps a ``BytesInteger`` or ``BitsInteger`` with an adapter that converts
+    raw integers to/from the given ``IntFlag`` subclass on parse/build.
+    """
+    bits: int
+    type: EnumType
+    signed: bool = False
+
+    def to_construct(self) -> Adapter:
+        if self.bits % 8 == 0:
+            base = BytesInteger(self.bits // 8, signed=self.signed)
+        else:
+            base = BitsInteger(self.bits, signed=self.signed)
+
+        flagType = self.type
+
+        class FlagAdapter(Adapter):
+            def _decode(self, obj, context, path):
+                return flagType(obj)
+
+            def _encode(self, obj, context, path):
+                return obj.value if isinstance(obj, flagType) else int(obj)
+
+        return FlagAdapter(base)
+
+
+class b_flag:
+    """ Factory for bitmask/flag field annotations.
+
+    Use ``b_flag[bits, FlagType, signed]``.  All three arguments are required.
+
+    :param bits:     Width of the field in bits (positive integer).
+    :param FlagType: An ``IntFlag`` subclass whose members represent individual bits.
+    :param signed:   ``True`` for a signed field, ``False`` for unsigned.
+    """
+    @classmethod
+    def __class_getitem__(cls, args) -> type[Flag]:
+        if not isinstance(args, tuple) or len(args) in (2, 3):
+            raise BinaryTypeError("Use b_flag[bits, enumType] or b_flag[bits, enumType, signed]")
+
+        bits, flagType, *remaining = args
+        signed = remaining[0] if remaining else False
+
+        if not isinstance(bits, int) or bits <= 0:
+            raise BinaryDefinitionError("Width in bits must be a positive integer")
+        if not isinstance(signed, bool):
+            raise BinaryDefinitionError("Signed must be a boolean")
+        if not isinstance(flagType, EnumType):
+            raise BinaryDefinitionError("flagType must be an Flag")
+
+        return Annotated[flagType, FlagBinaryMeta(bits, flagType, signed)]
 
 
 @dataclass(frozen=True)
@@ -100,9 +214,43 @@ class b_array:
         return Annotated[list, ArrayBinaryMeta(width, element)]  # type: ignore[return-value]
 
 
+@dataclass(frozen=True)
+class GreedyBinaryMeta:
+    """ Metadata for a variable-length array field that consumes all remaining bytes.
+
+    Produces a ``GreedyRange`` over the element type's construct.
+    """
+    element: Any
+
+    def to_construct(self) -> GreedyRange:
+        return GreedyRange(get_binary_meta(self.element).to_construct())
+
+
+class b_greedy:
+    """ Factory for greedy array field annotations.
+
+    Use ``b_greedy[element_type]``.  The field reads elements until the input
+    is exhausted, so it must be the last field in a packet.
+    """
+    @classmethod
+    def __class_getitem__(cls, args) -> type[list]:
+        element = args
+        return Annotated[list, GreedyBinaryMeta(element)]
+
+
 def get_binary_meta(annotation: Any) -> IntegerBinaryMeta | BytesBinaryMeta | ArrayBinaryMeta | None:
+    """ Extract binary metadata from an ``Annotated`` type hint.
+
+    Scans the metadata arguments of an ``Annotated[T, ...]`` type and returns
+    the first recognized binary metadata object, or ``None`` if the annotation
+    carries no binary metadata.
+
+    :param annotation: A type hint, typically produced by one of the ``b_*`` factories.
+    :returns:          The binary metadata instance, or ``None``.
+    """
     if get_origin(annotation) is Annotated:
         for arg in get_args(annotation)[1:]:
-            if isinstance(arg, (IntegerBinaryMeta, BytesBinaryMeta, ArrayBinaryMeta)):
+            if isinstance(arg, (IntegerBinaryMeta, BytesBinaryMeta, ArrayBinaryMeta, EnumBinaryMeta, FlagBinaryMeta,
+                                GreedyBinaryMeta)):
                 return arg
     return None
