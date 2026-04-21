@@ -125,6 +125,41 @@ class Packet(BinaryPacket):
     perms: b_flag[8, Permission, False]    # 8-bit unsigned flag
 ```
 
+### Switch
+
+Select a sub-structure to parse/build based on the value of another field:
+
+```python
+from enum import IntEnum
+from pyparse import BinaryPacket, b_uint8, b_array, b_enum, b_switch
+
+class MsgType(IntEnum):
+    PING = 0
+    DATA = 1
+
+class PingBody(BinaryPacket):
+    seq: b_uint8
+
+class DataBody(BinaryPacket):
+    length:  b_uint8
+    payload: b_array['length', b_uint8]
+
+class Message(BinaryPacket):
+    msg_type: b_enum[8, MsgType]
+    body:     b_switch['msg_type', {MsgType.PING: PingBody, MsgType.DATA: DataBody}]
+```
+
+An optional third argument sets the fallback type when no case matches. Without it, an unmatched key raises a `MappingError` at parse/build time.
+
+The key can also be a callable that receives the full parse context, for cases where the selection depends on more than one field:
+
+```python
+body: b_switch[lambda ctx: (ctx.type, ctx.version), {
+    (MsgType.DATA, 1): DataBodyV1,
+    (MsgType.DATA, 2): DataBodyV2,
+}]
+```
+
 ### Nested Packets
 
 Any `BinaryPacket` subclass can be used as a field type:

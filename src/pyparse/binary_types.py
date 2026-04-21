@@ -3,9 +3,9 @@ which is used to create appropriate concrete binary types.
 """
 from dataclasses import dataclass
 from enum import Enum, Flag, EnumType
-from typing import Any,  Annotated, get_origin, get_args
+from typing import Any, Annotated, get_origin, get_args, Callable
 
-from construct import Array, BytesInteger, BitsInteger, Bytes, this, Adapter, GreedyRange
+from construct import Array, BytesInteger, BitsInteger, Bytes, this, Adapter, GreedyRange, Struct, Switch
 
 from pyparse.errors import BinaryDefinitionError, BinaryTypeError
 
@@ -145,7 +145,7 @@ class b_flag:
     """
     @classmethod
     def __class_getitem__(cls, args) -> type[Flag]:
-        if not isinstance(args, tuple) or len(args) in (2, 3):
+        if not isinstance(args, tuple) or len(args) not in (2, 3):
             raise BinaryTypeError("Use b_flag[bits, enumType] or b_flag[bits, enumType, signed]")
 
         bits, flagType, *remaining = args
@@ -238,6 +238,82 @@ class b_greedy:
         return Annotated[list, GreedyBinaryMeta(element)]
 
 
+@dataclass(frozen=True)
+class SwitchBinaryMeta:
+    """ Metadata for a switch field that selects a sub-structure based on a key value.
+
+    ``key`` is either a field name string or a callable ``(context) -> value`` for
+    cases where the selection depends on more than one field.  ``cases`` maps key
+    values to the corresponding type (a ``BinaryPacket`` subclass or ``b_*`` type).
+    If ``default`` is set it is used when no case matches; otherwise a missing key
+    raises a construct ``MappingError``.
+    """
+    key:   str | Callable
+    cases: dict[Any, Struct]
+    default: Any = None
+
+    def to_construct(self):
+        key     = self.key
+        key_f   = this[key] if isinstance(key, str) else key
+        cases   = self.cases
+        default = self.default
+
+        def _subcon(annotation):
+            if hasattr(annotation, '__construct__'):
+                return annotation.__construct__
+            meta = get_binary_meta(annotation)
+            if meta is not None:
+                return meta.to_construct()
+            raise BinaryDefinitionError(f"Unsupported type in b_switch cases: {annotation!r}")
+
+        construct_cases = {case: _subcon(element) for case, element in cases.items()}
+        switch_kwargs   = {'default': _subcon(default)} if default is not None else {}
+        switch_subcon   = Switch(key_f, construct_cases, **switch_kwargs)
+
+        class SwitchAdapter(Adapter):
+            def _decode(self, obj, context, path):
+                key_value  = context[key] if isinstance(key, str) else key(context)
+                annotation = cases.get(key_value, default)
+                if annotation is not None and hasattr(annotation, '_from_container'):
+                    return annotation._from_container(obj)
+                return obj
+
+            def _encode(self, obj, context, path):
+                # _to_dict already converted any BinaryPacket to a dict
+                return obj
+
+        return SwitchAdapter(switch_subcon)
+
+
+class b_switch:
+    """ Factory for switch field annotations.
+
+    Selects which sub-structure to parse/build based on the value of another field.
+    Use ``b_switch[key, cases]`` or ``b_switch[key, cases, default]``.
+
+    :param key:     A field name string, or a callable ``(context) -> value`` when
+                    the selection depends on more than one field.
+    :param cases:   A dict mapping key values to types (``BinaryPacket`` subclasses
+                    or ``b_*`` annotations).
+    :param default: Fallback type when no case matches.  If omitted, an unmatched
+                    key raises a ``MappingError`` at parse/build time.
+    """
+    @classmethod
+    def __class_getitem__(cls, args) -> Any:
+        if not isinstance(args, tuple) or len(args) not in (2, 3):
+            raise BinaryTypeError("Use b_switch[key, cases] or b_switch[key, cases, default]")
+
+        key, cases, *remaining = args
+        default = remaining[0] if remaining else None
+
+        if not isinstance(key, (str, Callable)):
+            raise BinaryDefinitionError("key must be a field name string or callable")
+        if not isinstance(cases, dict):
+            raise BinaryDefinitionError("cases must be a dict")
+
+        return Annotated[Any, SwitchBinaryMeta(key, cases, default)]
+
+
 def get_binary_meta(annotation: Any) -> IntegerBinaryMeta | BytesBinaryMeta | ArrayBinaryMeta | None:
     """ Extract binary metadata from an ``Annotated`` type hint.
 
@@ -251,6 +327,6 @@ def get_binary_meta(annotation: Any) -> IntegerBinaryMeta | BytesBinaryMeta | Ar
     if get_origin(annotation) is Annotated:
         for arg in get_args(annotation)[1:]:
             if isinstance(arg, (IntegerBinaryMeta, BytesBinaryMeta, ArrayBinaryMeta, EnumBinaryMeta, FlagBinaryMeta,
-                                GreedyBinaryMeta)):
+                                GreedyBinaryMeta, SwitchBinaryMeta)):
                 return arg
     return None
