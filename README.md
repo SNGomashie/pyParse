@@ -214,6 +214,48 @@ class StrictPacket(BinaryPacket, policy=AlignmentPolicy.STRICT):
 
 ---
 
+## Diagrams
+
+pyparse can render any `BinaryPacket` as an RFC-style bit/byte diagram in Microsoft Visio. This is an optional feature; install it with:
+
+```
+pip install pyparse[diagram]
+```
+
+It requires Windows with Visio installed (the renderer drives Visio over COM).
+
+```python
+from pyparse import BinaryPacket, b_uint8, b_uint16
+from pyparse.diagram import draw_rfc_diagram
+
+class Header(BinaryPacket):
+    version: b_uint8
+    flags:   b_uint8
+    length:  b_uint16
+
+draw_rfc_diagram(Header)
+```
+
+This opens Visio and draws one cell per field, with the field name above its type label, and a bit/byte ruler above the first row. Fields that don't fit on a 32-bit row are split across rows automatically.
+
+### Options
+
+| Argument | Default | Effect |
+|----------|---------|--------|
+| `expand_nested` | `True` | Inline nested packets and tint them by type |
+| `row_bits` | `32` | Row width in bits (use `16`, `64`, etc. for non-RFC layouts) |
+| `editable` | `True` | Leave the Visio document open for editing after rendering |
+
+### CLI
+
+The same renderer is available as a command-line tool that takes a dotted import path to any `BinaryPacket` subclass:
+
+```
+python -m pyparse.diagram.rfc mypkg.protocol.Header --expand-nested --row-bits 32 --keep-open
+```
+
+---
+
 ## Architecture Overview
 
 ```
