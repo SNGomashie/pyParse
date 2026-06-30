@@ -17,6 +17,9 @@ dev = [
     "pytest",
     "pytest-cov"
 ]
+diagram = [
+    "pywin32",
+]
 
 [tool.pytest.ini_options]
 addopts = [
