@@ -24,6 +24,13 @@ class IntegerBinaryMeta:
             return BytesInteger(self.bits // 8, signed=self.signed)
         return BitsInteger(self.bits, signed=self.signed)
 
+    @property
+    def bit_width(self) -> int:
+        return self.bits
+
+    def description(self) -> str:
+        return f"{'int' if self.signed else 'uint'}{self.bits}"
+
 
 class b_int:
     """ Factory for integer binary type annotations.
@@ -76,6 +83,13 @@ class EnumBinaryMeta:
                 return obj.value if isinstance(obj, enumType) else int(obj)
 
         return EnumAdapter(base)
+
+    @property
+    def bit_width(self) -> int:
+        return self.bits
+
+    def description(self) -> str:
+        return f"{self.type.__name__}[{'int' if self.signed else 'uint'}{self.bits}]"
 
 
 class b_enum:
@@ -133,6 +147,13 @@ class FlagBinaryMeta:
 
         return FlagAdapter(base)
 
+    @property
+    def bit_width(self) -> int:
+        return self.bits
+
+    def description(self) -> str:
+        return f"{self.type.__name__}[{'int' if self.signed else 'uint'}{self.bits}]"
+
 
 class b_flag:
     """ Factory for bitmask/flag field annotations.
@@ -170,6 +191,13 @@ class BytesBinaryMeta:
     def to_construct(self) -> Bytes:
         return Bytes(self.width)
 
+    @property
+    def bit_width(self) -> int:
+        return self.width * 8
+
+    def description(self) -> str:
+        return "byte" if self.width == 1 else f"bytes[{self.width}]"
+
 
 class b_bytes:
     """ Factory for fixed-width bytes field annotations. Use ``b_bytes[width]``.
@@ -200,6 +228,18 @@ class ArrayBinaryMeta:
             return Array(expr, self.element.__construct__)
         return Array(expr, get_binary_meta(self.element).to_construct())
 
+    @property
+    def bit_width(self) -> int | None:
+        if isinstance(self.width, str):
+            return None  # dynamic size — resolved at parse time
+        if hasattr(self.element, "__construct__"):
+            return self.width * self.element.__construct__.sizeof() * 8
+        return self.width * get_binary_meta(self.element).bit_width
+
+    def description(self) -> str:
+        size = f"'{self.width}'" if isinstance(self.width, str) else str(self.width)
+        return f"{_element_label(self.element)}[{size}]"
+
 
 class b_array:
     """Factory for array field annotations. Use ``b_array[width, element_type]``.
@@ -224,6 +264,13 @@ class GreedyBinaryMeta:
 
     def to_construct(self) -> GreedyRange:
         return GreedyRange(get_binary_meta(self.element).to_construct())
+
+    @property
+    def bit_width(self) -> None:
+        return None  # consumes to end of input
+
+    def description(self) -> str:
+        return f"{_element_label(self.element)}[...]"
 
 
 class b_greedy:
@@ -284,6 +331,13 @@ class SwitchBinaryMeta:
 
         return SwitchAdapter(switch_subcon)
 
+    @property
+    def bit_width(self) -> None:
+        return None  # case-dependent
+
+    def description(self) -> str:
+        return f"switch[{self.key}]" if isinstance(self.key, str) else "switch"
+
 
 class b_switch:
     """ Factory for switch field annotations.
@@ -336,3 +390,12 @@ def get_binary_meta(annotation: Any) -> IntegerBinaryMeta | BytesBinaryMeta | Ar
                                 GreedyBinaryMeta, SwitchBinaryMeta)):
                 return arg
     return None
+
+
+def _element_label(element: Any) -> str:
+    """ Return a short type label for an array/greedy element (packet class or ``b_*`` annotation).
+    """
+    if hasattr(element, "__groups__"):
+        return element.__name__
+    meta = get_binary_meta(element)
+    return meta.description() if meta else ""
