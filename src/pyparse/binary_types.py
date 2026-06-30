@@ -3,7 +3,7 @@ which is used to create appropriate concrete binary types.
 """
 from dataclasses import dataclass
 from enum import Enum, Flag, EnumType
-from typing import Any, Annotated, get_origin, get_args, Callable
+from typing import Any, Annotated, Union, get_origin, get_args, Callable
 
 from construct import Array, BytesInteger, BitsInteger, Bytes, this, Adapter, GreedyRange, Struct, Switch
 
@@ -211,7 +211,7 @@ class b_array:
         """ Return an ``Annotated[list, ArrayBinaryMeta]`` type.
         """
         width, element = args
-        return Annotated[list, ArrayBinaryMeta(width, element)]  # type: ignore[return-value]
+        return Annotated[list[element], ArrayBinaryMeta(width, element)]  # type: ignore[return-value]
 
 
 @dataclass(frozen=True)
@@ -235,7 +235,7 @@ class b_greedy:
     @classmethod
     def __class_getitem__(cls, args) -> type[list]:
         element = args
-        return Annotated[list, GreedyBinaryMeta(element)]
+        return Annotated[list[element], GreedyBinaryMeta(element)]
 
 
 @dataclass(frozen=True)
@@ -311,7 +311,13 @@ class b_switch:
         if not isinstance(cases, dict):
             raise BinaryDefinitionError("cases must be a dict")
 
-        return Annotated[Any, SwitchBinaryMeta(key, cases, default)]
+        # Build a Union of the case types (plus default) so static checkers can narrow on the result.
+        case_types = tuple(cases.values())
+        if default is not None:
+            case_types = case_types + (default,)
+        union = Union[case_types] if case_types else Any
+
+        return Annotated[union, SwitchBinaryMeta(key, cases, default)]
 
 
 def get_binary_meta(annotation: Any) -> IntegerBinaryMeta | BytesBinaryMeta | ArrayBinaryMeta | None:
