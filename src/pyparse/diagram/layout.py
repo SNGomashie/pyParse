@@ -4,8 +4,7 @@ from dataclasses import dataclass
 from typing      import get_type_hints
 
 from pyparse              import BinaryPacket
-from pyparse.binary_types import (get_binary_meta, IntegerBinaryMeta, ArrayBinaryMeta, BytesBinaryMeta, EnumBinaryMeta,
-                                  FlagBinaryMeta, GreedyBinaryMeta)
+from pyparse.binary_types import get_binary_meta, IntegerBinaryMeta
 from pyparse._builder     import BitFieldInfo
 
 
@@ -53,33 +52,6 @@ CELL_COLORS = [
 ]
 
 
-def _int_type_str(bits: int, signed: bool) -> str:
-    """ Format an integer type label such as ``uint8`` or ``int24``.
-
-    :param bits:   Bit width.
-    :param signed: Signedness flag.
-    :returns:      ``"int<bits>"`` if signed else ``"uint<bits>"``.
-    """
-    return f"{'int' if signed else 'uint'}{bits}"
-
-
-def _element_type_str(element) -> str:
-    """ Return a short type label for an array element annotation.
-
-    :param element: A nested :class:`BinaryPacket` subclass or a ``b_*`` annotation.
-    :returns:       Label such as ``uint16``, ``bytes[4]``, the packet class name, or ``""`` if unknown.
-    """
-    if hasattr(element, "__groups__"):
-        return element.__name__
-
-    meta = get_binary_meta(element)
-    if isinstance(meta, IntegerBinaryMeta):
-        return _int_type_str(meta.bits, meta.signed)
-    if isinstance(meta, BytesBinaryMeta):
-        return f"bytes[{meta.width}]"
-    return ""
-
-
 def _display_fields(packet_type: type[BinaryPacket],
                     expand_nested: bool = False,
                     _color_map: dict[str, str] = None,
@@ -103,11 +75,11 @@ def _display_fields(packet_type: type[BinaryPacket],
         if isinstance(group, BitFieldInfo):
             for field in group.fields:
                 meta = get_binary_meta(field.annotation)
-                if isinstance(meta, IntegerBinaryMeta):
-                    # Suppress the type label on very narrow bit fields where it would not fit visibly.
-                    label = "" if field.bits < 4 else _int_type_str(meta.bits, meta.signed)
-                elif isinstance(meta, (EnumBinaryMeta, FlagBinaryMeta)):
-                    label = f"{meta.type.__name__}" + f"[{_int_type_str(meta.bits, meta.signed)}]"
+                # Suppress the type label on very narrow integer bit fields where it wouldn't fit visibly.
+                if isinstance(meta, IntegerBinaryMeta) and field.bits < 4:
+                    label = ""
+                elif meta is not None:
+                    label = meta.description()
                 else:
                     label = f"uint{field.bits}"
 
@@ -118,10 +90,10 @@ def _display_fields(packet_type: type[BinaryPacket],
                                     fill=_fill))
             continue
 
-        name        = group.name
-        annotation  = annotations[name]
-        meta        = get_binary_meta(annotation)
+        name       = group.name
+        annotation = annotations[name]
 
+        # Nested packets aren't tagged with a meta; treat them specially.
         if hasattr(annotation, "__groups__"):
             nested_width = annotation.__construct__.sizeof() * 8
             if expand_nested:
@@ -137,54 +109,16 @@ def _display_fields(packet_type: type[BinaryPacket],
                 fields.extend(nested_fields)
             else:
                 fields.append(Field(name.capitalize(), nested_width, 'nested', annotation.__name__, _fill))
-        elif isinstance(meta, IntegerBinaryMeta):
-            fields.append(Field(name.capitalize(),
-                                meta.bits,
-                                'normal',
-                                _int_type_str(meta.bits, meta.signed),
-                                _fill))
-        elif isinstance(meta, BytesBinaryMeta):
-            fields.append(Field(name.capitalize(),
-                                meta.width * 8,
-                                "normal",
-                                "byte" if meta.width == 1 else f"bytes[{meta.width}]",
-                                _fill))
-        elif isinstance(meta, ArrayBinaryMeta):
-            if isinstance(meta.width, str):
-                # Array with dynamic size, fill the rest of the row
-                fields.append(Field(name.capitalize(),
-                                    None,
-                                    'variable',
-                                    f"{_element_type_str(meta.element)}['{meta.width}']",
-                                    _fill))
-            else:
-                # Array with static size assumes the total size of the array.
-                # Nested packets need their own sizeof(); bytes/integer metas expose width or bits.
-                if hasattr(meta.element, "__construct__"):
-                    element_bits = meta.element.__construct__.sizeof() * 8
-                else:
-                    element_meta = get_binary_meta(meta.element)
-                    if isinstance(element_meta, BytesBinaryMeta):
-                        element_bits = element_meta.width * 8
-                    else:
-                        element_bits = element_meta.bits
-                fields.append(Field(name.capitalize(),
-                                    meta.width * element_bits,
-                                    'normal',
-                                    f'{_element_type_str(meta.element)}[{meta.width}]',
-                                    _fill))
-        elif isinstance(meta, GreedyBinaryMeta):
-            fields.append(Field(name.capitalize(),
-                                None,
-                                'variable',
-                                f"{_element_type_str(meta.element)}[...]",
-                                _fill))
-        elif isinstance(meta, (EnumBinaryMeta, FlagBinaryMeta)):
-            fields.append(Field(name.capitalize(),
-                                meta.bits,
-                                "normal",
-                                f"{meta.type.__name__}" + f"[{_int_type_str(meta.bits, meta.signed)}]",
-                                _fill))
+            continue
+
+        meta = get_binary_meta(annotation)
+        if meta is None:
+            continue
+
+        width = meta.bit_width
+        style = 'variable' if width is None else 'normal'
+        fields.append(Field(name.capitalize(), width, style, meta.description(), _fill))
+
     return fields
 
 
